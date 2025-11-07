@@ -5,8 +5,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/company/holo/services/customer-service/internal/application/commands"
-	appqueries "github.com/company/holo/services/customer-service/internal/application/queries"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/application/commands"
+	appqueries "github.com/evgeniySeleznev/nwHS/services/customer-service/internal/application/queries"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"

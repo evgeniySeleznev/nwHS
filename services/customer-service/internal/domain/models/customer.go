@@ -3,7 +3,7 @@ package models
 import (
 	"time"
 
-	"github.com/company/holo/services/customer-service/internal/domain/valueobjects"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/domain/valueobjects"
 	"github.com/google/uuid"
 )
 

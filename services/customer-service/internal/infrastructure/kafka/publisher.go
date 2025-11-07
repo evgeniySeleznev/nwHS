@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/company/holo/services/customer-service/internal/domain/events"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/domain/events"
+	mongodlq "github.com/evgeniySeleznev/nwHS/services/customer-service/internal/infrastructure/mongo"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -13,11 +14,12 @@ import (
 type Publisher struct {
 	writer *kafka.Writer
 	topic  string
+	dlq    *mongodlq.DeadLetterRepository
 }
 
 // NewPublisher создаёт новый Publisher.
-func NewPublisher(writer *kafka.Writer, topic string) *Publisher {
-	return &Publisher{writer: writer, topic: topic}
+func NewPublisher(writer *kafka.Writer, topic string, dlq *mongodlq.DeadLetterRepository) *Publisher {
+	return &Publisher{writer: writer, topic: topic, dlq: dlq}
 }
 
 // PublishCustomerRegistered реализует DomainEventPublisher.
@@ -34,6 +36,9 @@ func (p *Publisher) PublishCustomerRegistered(ctx context.Context, event events.
 	}
 
 	if err := p.writer.WriteMessages(ctx, message); err != nil {
+		if p.dlq != nil {
+			_ = p.dlq.SaveCustomerEvent(ctx, event, payload, err)
+		}
 		return fmt.Errorf("write message: %w", err)
 	}
 

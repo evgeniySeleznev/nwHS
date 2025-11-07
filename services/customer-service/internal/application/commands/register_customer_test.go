@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/company/holo/services/customer-service/internal/domain/events"
-	"github.com/company/holo/services/customer-service/internal/domain/models"
-	"github.com/company/holo/services/customer-service/internal/domain/valueobjects"
+	appqueries "github.com/evgeniySeleznev/nwHS/services/customer-service/internal/application/queries"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/domain/events"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/domain/models"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/domain/valueobjects"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
@@ -117,7 +118,7 @@ func TestRegisterCustomerHandler_RepositoryError(t *testing.T) {
 
 func TestGetCustomerHandler_Handle(t *testing.T) {
 	repo := &fakeRepo{}
-	handler := NewGetCustomerHandler(repo)
+	handler := appqueries.NewGetCustomerHandler(repo)
 
 	customer, _ := models.NewCustomer("John Doe", mustEmail("john@example.com"), mustPhone("+1234567890"), time.Date(1990, 5, 10, 0, 0, 0, 0, time.UTC))
 	repo.saved = models.RehydrateCustomer(uuid.MustParse(customer.ID().String()), customer.Email(), customer.FullName(), customer.PhoneNumber(), customer.BirthDate(), customer.CreatedAt(), customer.UpdatedAt(), customer.Version())

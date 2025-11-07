@@ -8,9 +8,9 @@ import (
 
 type testConfig struct {
 	HTTP struct {
-        Port int `yaml:"port" mapstructure:"port"`
-    } `yaml:"http" mapstructure:"http"`
-    FeatureFlag bool `yaml:"feature_flag" mapstructure:"feature_flag"`
+		Port int `yaml:"port" mapstructure:"port"`
+	} `yaml:"http" mapstructure:"http"`
+	FeatureFlag bool `yaml:"feature_flag" mapstructure:"feature_flag"`
 }
 
 func TestLoaderLoad(t *testing.T) {

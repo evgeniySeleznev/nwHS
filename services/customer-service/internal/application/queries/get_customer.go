@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/company/holo/services/customer-service/internal/domain/models"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/domain/models"
 )
 
 // CustomerDTO представляет данные для отдачи наружу.

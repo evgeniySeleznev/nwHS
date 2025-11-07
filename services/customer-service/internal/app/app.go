@@ -2,47 +2,53 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"time"
 
-	kafkaInfra "github.com/company/holo/services/customer-service/internal/infrastructure/kafka"
-	repository "github.com/company/holo/services/customer-service/internal/infrastructure/repository"
-	search "github.com/company/holo/services/customer-service/internal/infrastructure/search"
-	grpciface "github.com/company/holo/services/customer-service/internal/interfaces/grpc"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/application/commands"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/application/queries"
+	kafkaInfra "github.com/evgeniySeleznev/nwHS/services/customer-service/internal/infrastructure/kafka"
+	mongodlq "github.com/evgeniySeleznev/nwHS/services/customer-service/internal/infrastructure/mongo"
+	repository "github.com/evgeniySeleznev/nwHS/services/customer-service/internal/infrastructure/repository"
+	search "github.com/evgeniySeleznev/nwHS/services/customer-service/internal/infrastructure/search"
+	grpciface "github.com/evgeniySeleznev/nwHS/services/customer-service/internal/interfaces/grpc"
 
-	"github.com/company/holo/services/customer-service/internal/application/commands"
-	"github.com/company/holo/services/customer-service/internal/application/queries"
-
-	"github.com/company/holo/pkg/logger"
-	"github.com/company/holo/pkg/metrics"
-	"github.com/company/holo/pkg/tracing"
+	grpcmiddleware "github.com/evgeniySeleznev/nwHS/pkg/grpc/middleware"
+	"github.com/evgeniySeleznev/nwHS/pkg/logger"
+	"github.com/evgeniySeleznev/nwHS/pkg/metrics"
+	sentryobs "github.com/evgeniySeleznev/nwHS/pkg/observability/sentry"
+	"github.com/evgeniySeleznev/nwHS/pkg/tracing"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/opensearch-project/opensearch-go/v2"
 	"github.com/segmentio/kafka-go"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
-// App описывает корневой объект сервисного контейнера.
+// App описывает корневой сервисный контейнер.
 type App struct {
-	cfg      Config
-	log      *zap.Logger
-	metrics  *metrics.Collector
-	tracer   tracing.Provider
-	pool     *pgxpool.Pool
-	writer   *kafka.Writer
-	indexer  *search.Indexer
-	server   *grpciface.Transport
-	listener net.Listener
-	shutdown []func(context.Context) error
-}
-
-// Provider описывает зависимость для трейсинга (адаптер над OTEL провайдером).
-type Provider interface {
-	Shutdown(ctx context.Context) error
+	cfg        Config
+	log        *zap.Logger
+	metrics    *metrics.Collector
+	tracer     tracing.Provider
+	sentry     *sentryobs.Client
+	pool       *pgxpool.Pool
+	writer     *kafka.Writer
+	indexer    *search.Indexer
+	server     *grpciface.Transport
+	metricsSrv *http.Server
+	listener   net.Listener
+	mongo      *mongo.Client
+	shutdown   []func(context.Context) error
 }
 
 // New создаёт экземпляр приложения с переданными зависимостями.
-func New(ctx context.Context, cfg Config, logCfg logger.Config, tracer tracing.Provider) (*App, error) {
+func New(ctx context.Context, cfg Config, logCfg logger.Config) (*App, error) {
 	cfg.Defaults()
 
 	zapLogger, err := logger.New(logCfg)
@@ -51,6 +57,27 @@ func New(ctx context.Context, cfg Config, logCfg logger.Config, tracer tracing.P
 	}
 
 	collector := metrics.NewCollector()
+
+	tracer, err := tracing.InitProvider(ctx, tracing.Config{
+		Endpoint:    cfg.Observability.Tracing.Endpoint,
+		Insecure:    cfg.Observability.Tracing.Insecure,
+		Service:     cfg.ServiceName,
+		Environment: cfg.Observability.Sentry.Environment,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("app: tracing: %w", err)
+	}
+
+	sentryClient, err := sentryobs.Init(sentryobs.Config{
+		DSN:              cfg.Observability.Sentry.DSN,
+		Environment:      cfg.Observability.Sentry.Environment,
+		Release:          cfg.Observability.Sentry.Release,
+		SampleRate:       cfg.Observability.Sentry.SampleRate,
+		TracesSampleRate: cfg.Observability.Sentry.TracesSampleRate,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("app: sentry init: %w", err)
+	}
 
 	pool, err := newPostgresPool(ctx, cfg)
 	if err != nil {
@@ -70,12 +97,32 @@ func New(ctx context.Context, cfg Config, logCfg logger.Config, tracer tracing.P
 
 	repo := repository.NewPostgresRepository(pool)
 	indexer := search.NewIndexer(osClient, cfg.Search.Index)
-	publisher := kafkaInfra.NewPublisher(writer, cfg.Kafka.CustomerTopic)
+
+	var (
+		mongoClient *mongo.Client
+		dlqRepo     *mongodlq.DeadLetterRepository
+	)
+
+	if cfg.Kafka.DLQ.MongoURI != "" {
+		mongoClient, err = newMongoClient(ctx, cfg.Kafka.DLQ.MongoURI)
+		if err != nil {
+			return nil, fmt.Errorf("app: dlq mongo: %w", err)
+		}
+		dlqRepo = mongodlq.NewDeadLetterRepository(mongoClient, cfg.Kafka.DLQ.Database, cfg.Kafka.DLQ.Collection)
+	}
+
+	publisher := kafkaInfra.NewPublisher(writer, cfg.Kafka.CustomerTopic, dlqRepo)
 
 	registerHandler := commands.NewRegisterCustomerHandler(repo, indexer, publisher, zapLogger)
 	getHandler := queries.NewGetCustomerHandler(repo)
 
-	transport := grpciface.NewTransport(registerHandler, getHandler, zapLogger)
+	telemetryInterceptor := grpcmiddleware.UnaryTelemetryInterceptor(cfg.ServiceName, collector, sentryClient, zapLogger)
+	transport := grpciface.NewTransport(
+		registerHandler,
+		getHandler,
+		zapLogger,
+		grpc.UnaryInterceptor(telemetryInterceptor),
+	)
 
 	address := fmt.Sprintf("%s:%d", cfg.GRPC.Host, cfg.GRPC.Port)
 	listener, err := net.Listen("tcp", address)
@@ -83,16 +130,28 @@ func New(ctx context.Context, cfg Config, logCfg logger.Config, tracer tracing.P
 		return nil, fmt.Errorf("listen %s: %w", address, err)
 	}
 
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", collector.Handler())
+
+	metricsSrv := &http.Server{
+		Addr:              cfg.Observability.Metrics.Addr,
+		Handler:           metricsMux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
 	app := &App{
-		cfg:      cfg,
-		log:      zapLogger,
-		metrics:  collector,
-		tracer:   tracer,
-		pool:     pool,
-		writer:   writer,
-		indexer:  indexer,
-		server:   transport,
-		listener: listener,
+		cfg:        cfg,
+		log:        zapLogger,
+		metrics:    collector,
+		tracer:     tracer,
+		sentry:     sentryClient,
+		pool:       pool,
+		writer:     writer,
+		indexer:    indexer,
+		server:     transport,
+		metricsSrv: metricsSrv,
+		listener:   listener,
+		mongo:      mongoClient,
 	}
 
 	app.shutdown = []func(context.Context) error{
@@ -112,9 +171,30 @@ func New(ctx context.Context, cfg Config, logCfg logger.Config, tracer tracing.P
 			return writer.Close()
 		},
 		func(ctx context.Context) error {
-			return tracer.Shutdown(ctx)
+			if tracer != nil {
+				return tracer.Shutdown(ctx)
+			}
+			return nil
 		},
 		func(ctx context.Context) error {
+			if sentryClient != nil {
+				sentryClient.Flush(ctx)
+			}
+			return nil
+		},
+		func(ctx context.Context) error {
+			if metricsSrv != nil {
+				return metricsSrv.Shutdown(ctx)
+			}
+			return nil
+		},
+		func(ctx context.Context) error {
+			if mongoClient != nil {
+				return mongoClient.Disconnect(ctx)
+			}
+			return nil
+		},
+		func(context.Context) error {
 			return zapLogger.Sync()
 		},
 	}
@@ -124,9 +204,18 @@ func New(ctx context.Context, cfg Config, logCfg logger.Config, tracer tracing.P
 	return app, nil
 }
 
-// Run запускает инфраструктурные слои. Здесь будет инициализация транспорта.
+// Run запускает инфраструктурные слои.
 func (a *App) Run(ctx context.Context) error {
 	a.log.Info("customer service started", zap.String("addr", a.listener.Addr().String()))
+
+	if a.metricsSrv != nil {
+		a.log.Info("metrics server listening", zap.String("addr", a.metricsSrv.Addr))
+		go func() {
+			if err := a.metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				a.log.Error("metrics server error", zap.Error(err))
+			}
+		}()
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -176,4 +265,21 @@ func newPostgresPool(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {
 	}
 
 	return pool, nil
+}
+
+func newMongoClient(ctx context.Context, uri string) (*mongo.Client, error) {
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+	if err != nil {
+		return nil, err
+	}
+
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := client.Ping(pingCtx, nil); err != nil {
+		_ = client.Disconnect(ctx)
+		return nil, err
+	}
+
+	return client, nil
 }

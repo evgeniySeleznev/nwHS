@@ -1,10 +1,10 @@
-module github.com/company/holo/services/booking
+module github.com/evgeniySeleznev/nwHS/services/booking
 
 go 1.25
 
 require (
-    github.com/company/holo v0.0.0
+    github.com/evgeniySeleznev/nwHS v0.0.0
 )
 
-replace github.com/company/holo => ../..
+replace github.com/evgeniySeleznev/nwHS => ../..
 

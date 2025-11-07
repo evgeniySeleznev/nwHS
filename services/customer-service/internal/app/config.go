@@ -20,6 +20,11 @@ type Config struct {
 		CustomerTopic      string   `mapstructure:"customer_topic"`
 		OutboxPollInterval string   `mapstructure:"outbox_poll_interval"`
 		ConsumerGroup      string   `mapstructure:"consumer_group"`
+		DLQ                struct {
+			MongoURI   string `mapstructure:"mongo_uri"`
+			Database   string `mapstructure:"database"`
+			Collection string `mapstructure:"collection"`
+		} `mapstructure:"dlq"`
 	} `mapstructure:"kafka"`
 
 	Redis struct {
@@ -33,6 +38,25 @@ type Config struct {
 		Endpoint string `mapstructure:"endpoint"`
 		Index    string `mapstructure:"index"`
 	} `mapstructure:"search"`
+
+	Observability struct {
+		Metrics struct {
+			Addr string `mapstructure:"addr"`
+		} `mapstructure:"metrics"`
+
+		Sentry struct {
+			DSN              string  `mapstructure:"dsn"`
+			Environment      string  `mapstructure:"environment"`
+			Release          string  `mapstructure:"release"`
+			SampleRate       float64 `mapstructure:"sample_rate"`
+			TracesSampleRate float64 `mapstructure:"traces_sample_rate"`
+		} `mapstructure:"sentry"`
+
+		Tracing struct {
+			Endpoint string `mapstructure:"endpoint"`
+			Insecure bool   `mapstructure:"insecure"`
+		} `mapstructure:"tracing"`
+	} `mapstructure:"observability"`
 }
 
 // Defaults заполняет значения по умолчанию.
@@ -54,5 +78,20 @@ func (c *Config) Defaults() {
 	}
 	if c.Postgres.MaxConns == 0 {
 		c.Postgres.MaxConns = 16
+	}
+	if c.Kafka.DLQ.Database == "" {
+		c.Kafka.DLQ.Database = "holo_dlq"
+	}
+	if c.Kafka.DLQ.Collection == "" {
+		c.Kafka.DLQ.Collection = "customer_events"
+	}
+	if c.Observability.Metrics.Addr == "" {
+		c.Observability.Metrics.Addr = ":9100"
+	}
+	if c.Observability.Sentry.Release == "" {
+		c.Observability.Sentry.Release = c.ServiceName
+	}
+	if c.Observability.Sentry.Environment == "" {
+		c.Observability.Sentry.Environment = c.ServiceName
 	}
 }

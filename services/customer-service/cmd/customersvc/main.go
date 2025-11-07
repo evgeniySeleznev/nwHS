@@ -8,10 +8,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/company/holo/pkg/config"
-	"github.com/company/holo/pkg/logger"
-	"github.com/company/holo/pkg/tracing"
-	"github.com/company/holo/services/customer-service/internal/app"
+	"github.com/evgeniySeleznev/nwHS/pkg/config"
+	"github.com/evgeniySeleznev/nwHS/pkg/logger"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/app"
 	"go.uber.org/zap"
 )
 
@@ -25,21 +24,18 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	tracer, err := tracing.InitProvider(ctx, tracing.Config{
-		Endpoint:    os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-		Insecure:    os.Getenv("OTEL_EXPORTER_OTLP_INSECURE") == "true",
-		Service:     cfg.ServiceName,
-		Environment: os.Getenv("APP_ENV"),
-	})
-	if err != nil {
-		log.Fatalf("failed to init tracing: %v", err)
+	if env := os.Getenv("APP_ENV"); env != "" {
+		cfg.Observability.Sentry.Environment = env
+	}
+	if release := os.Getenv("APP_RELEASE"); release != "" {
+		cfg.Observability.Sentry.Release = release
 	}
 
 	application, err := app.New(ctx, cfg, logger.Config{
 		Level:       os.Getenv("LOG_LEVEL"),
 		Environment: os.Getenv("APP_ENV"),
 		Encoding:    "json",
-	}, tracer)
+	})
 	if err != nil {
 		log.Fatalf("failed to init app: %v", err)
 	}

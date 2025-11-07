@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/company/holo/services/customer-service/internal/domain/models"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/domain/models"
 	opensearch "github.com/opensearch-project/opensearch-go/v2"
 )
 

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/company/holo/services/customer-service/internal/domain/events"
-	"github.com/company/holo/services/customer-service/internal/domain/models"
-	"github.com/company/holo/services/customer-service/internal/domain/valueobjects"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/domain/events"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/domain/models"
+	"github.com/evgeniySeleznev/nwHS/services/customer-service/internal/domain/valueobjects"
 	"go.uber.org/zap"
 )
 
