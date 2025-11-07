@@ -1,0 +1,12 @@
+go 1.25
+
+use (
+    .
+    ./services/customer-service
+    ./services/booking-service
+    ./services/attendance-service
+    ./services/billing-service
+    ./services/notification-service
+    ./services/analytics-service
+)
+
